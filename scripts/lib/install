@@ -23,6 +23,7 @@ apt-get install -y puppet git python python-six crudini $ADDITIONAL_PACKAGES
 
 # Create and activate a virtualenv
 if [ "$VIRTUALENV_NEEDED" = "yes" ]; then
+    python -c 'import sys; print(sys.version_info[:])'
     /root/zulip/scripts/lib/create-production-venv /root/zulip/zulip-venv
 fi
 
