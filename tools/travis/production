@@ -2,4 +2,7 @@
 set -e
 set -x
 
-sudo ./tools/travis/production-helper
+sudo su
+printenv
+
+./tools/travis/production-helper
