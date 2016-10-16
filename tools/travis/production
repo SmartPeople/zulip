@@ -2,7 +2,12 @@
 set -e
 set -x
 
-sudo su
-printenv
+PYTHON_VERSION=`python -c "import sys;print(sys.version_info[0])"`
 
-./tools/travis/production-helper
+if [[ ${PYTHON_VERSION} == '3' ]];
+then
+    sudo rm -rf /usr/bin/python
+    sudo ln -s /usr/bin/python3.4 /usr/bin/python
+fi
+
+sudo ./tools/travis/production-helper

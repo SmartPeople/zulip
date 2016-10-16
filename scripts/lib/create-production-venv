@@ -20,7 +20,7 @@ args = parser.parse_args()
 run(["apt-get", "-y", "install"] + VENV_DEPENDENCIES)
 
 python_version = sys.version_info[0]
-
+print("PYTHON_VERSION", python_version)
 cached_venv_path = setup_virtualenv(
     args.target,
     os.path.join(ZULIP_PATH, "requirements", "py{}_prod.txt".format(python_version)),

@@ -2,6 +2,11 @@
 set -e
 set -x
 
+if [[ ${PYTHON_VERSION} == '3' ]];
+then
+    source /home/travis/virtualenv/python3.4/bin/activate
+fi
+
 apt-get install -y openssl ssl-cert
 ln -nsf /etc/ssl/certs/ssl-cert-snakeoil.pem /etc/ssl/certs/zulip.combined-chain.crt
 ln -nsf /etc/ssl/private/ssl-cert-snakeoil.key /etc/ssl/private/zulip.key
@@ -41,7 +46,7 @@ NOREPLY_EMAIL_ADDRESS = 'noreply@travis.example.com'
 DEFAULT_FROM_EMAIL = "Zulip <zulip@travis.example.com>"
 ALLOWED_HOSTS = []
 EOF
-
+echo "alias python=/home/travis/virtualenv/python3.4/bin/" >> /home/zulip/.bashrc
 su zulip -c /home/zulip/deployments/current/scripts/setup/initialize-database
 
 # TODO: Ideally this would test actually logging in, but this is a start.
