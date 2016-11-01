@@ -208,6 +208,7 @@ DEFAULT_SETTINGS = {'TWITTER_CONSUMER_KEY': '',
                     'PASSWORD_MIN_LENGTH': 6,
                     'PASSWORD_MIN_ZXCVBN_QUALITY': 0.5,
                     'OFFLINE_THRESHOLD_SECS': 5 * 60,
+                    'ARCHIVED_DATA_RETENTION_DAYS': 30,
                     }
 
 for setting_name, setting_val in six.iteritems(DEFAULT_SETTINGS):
