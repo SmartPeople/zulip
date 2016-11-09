@@ -1,9 +1,12 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
+from datetime import timedelta
 
+from django.conf import settings
 from django.db import connection, transaction
 from django.utils import timezone
+from zerver.lib.upload import delete_message_image
 from zerver.models import (Message, UserMessage, ArchivedMessage, ArchivedUserMessage,
                            Attachment, ArchivedAttachment)
 
@@ -116,9 +119,9 @@ def delete_expired_user_messages():
 
 def delete_expired_attachments():
     # type: () -> None
-    removing_attachments = Attachment.objects.filter(
+    attachments_to_remove = Attachment.objects.filter(
         messages__isnull=True, id__in=ArchivedAttachment.objects.all())
-    removing_attachments.delete()
+    attachments_to_remove.delete()
 
 
 def archive_messages():
@@ -130,3 +133,23 @@ def archive_messages():
     delete_expired_user_messages()
     delete_expired_messages()
     delete_expired_attachments()
+
+
+def delete_expired_archived_attachments():
+    # type: () -> None
+    expired_date = timezone.now() - timedelta(days=settings.ARCHIVED_DATA_RETENTION_DAYS)
+    arc_attachments = ArchivedAttachment.objects \
+        .filter(archived_date__lt=expired_date, messages__isnull=True) \
+        .exclude(id__in=Attachment.objects.all())
+    for arc_att in arc_attachments:
+        delete_message_image(arc_att.path_id)
+    arc_attachments.delete()
+
+
+def delete_expired_archived_data():
+    # type: () -> None
+    arc_expired_date = timezone.now() - timedelta(days=settings.ARCHIVED_DATA_RETENTION_DAYS)
+    ArchivedUserMessage.objects.filter(archived_date__lt=arc_expired_date).delete()
+    ArchivedMessage.objects.filter(archived_date__lt=arc_expired_date,
+                                   archivedusermessage__isnull=True).delete()
+    delete_expired_archived_attachments()
