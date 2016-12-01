@@ -133,6 +133,7 @@ Contents:
    analytics
    translating
    client
+   retention
    logging
    release-checklist
    README
