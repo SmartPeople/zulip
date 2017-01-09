@@ -13,23 +13,27 @@ except ImportError:
         # type: (str, str) -> bool
         return token1 == token2
 
+import base64
 import sockjs.tornado
-from sockjs.tornado.session import ConnectionInfo
 import tornado.ioloop
 import ujson
 import logging
 import time
 
+from sockjs.tornado.session import ConnectionInfo, Session
+
 from zerver.models import UserProfile, get_user_profile_by_id, get_client
 from zerver.lib.queue import queue_json_publish
 from zerver.lib.actions import check_send_message, extract_recipients
-from zerver.decorator import JsonableError
 from zerver.lib.utils import statsd
+from zerver.decorator import JsonableError, get_deployment_or_userprofile
 from zerver.middleware import record_request_start_data, record_request_stop_data, \
     record_request_restart_data, write_log_line, format_timedelta
 from zerver.lib.redis_utils import get_redis_client
 from zerver.lib.session_user import get_session_user
+from zerver.lib.str_utils import force_bytes
 from zerver.tornado.event_queue import get_client_descriptor
+
 
 logger = logging.getLogger('zulip.socket')
 
@@ -74,6 +78,38 @@ def req_redis_key(req_id):
     # type: (Text) -> Text
     return u'socket_req_status:%s' % (req_id,)
 
+
+def api_key_authenticate(auth_header_value):
+    # type: (str) -> UserProfile
+    from zilencer.models import Deployment
+    auth_type, credentials = auth_header_value.split()
+    # case insensitive per RFC 1945
+    if auth_type.lower() != "basic":
+        return None
+    role, api_key = base64.b64decode(force_bytes(credentials)).decode('utf-8').split(":")
+    try:
+        profile = get_deployment_or_userprofile(role)
+    except UserProfile.DoesNotExist:
+        raise SocketAuthError("Invalid user: {}".format(role))
+    except Deployment.DoesNotExist:
+        raise SocketAuthError("Invalid deployment: {}".format(role))
+    if api_key != profile.api_key:
+        if len(api_key) != 32:
+            SocketAuthError("Incorrect API key length (keys should be 32 "
+                            "characters long) for role '{}'".format(role))
+        else:
+            SocketAuthError("Invalid API key for role '{}'".format(role))
+    if not profile.is_active:
+        raise SocketAuthError("Account not active")
+    try:
+        if profile.realm.deactivated:
+            raise SocketAuthError("Realm for account has been deactivated")
+    except AttributeError:
+        # Deployment objects don't have realms
+        pass
+    return profile
+
+
 class SocketAuthError(Exception):
     def __init__(self, msg):
         # type: (str) -> None
@@ -88,6 +124,18 @@ class CloseErrorInfo(object):
 class SocketConnection(sockjs.tornado.SockJSConnection):
     client_id = None # type: Optional[Union[int, str]]
 
+    def __init__(self, session):
+        # type: (Session) -> None
+        super(SocketConnection, self).__init__(session)
+        self.authenticated = False
+        self.session.user_profile = None
+        self.close_info = None  # type: CloseErrorInfo
+        self.did_close = False
+        self.basic_auth_token = None  # type: str
+        self.browser_session_id = None  # type: str
+        self.csrf_token = None # type: str
+        self.timeout_handle = None # type: tornado.ioloop._Timeout
+
     def on_open(self, info):
         # type: (ConnectionInfo) -> None
         log_data = dict(extra='[transport=%s]' % (self.session.transport_name,))
@@ -95,14 +143,11 @@ class SocketConnection(sockjs.tornado.SockJSConnection):
 
         ioloop = tornado.ioloop.IOLoop.instance()
 
-        self.authenticated = False
-        self.session.user_profile = None
-        self.close_info = None # type: CloseErrorInfo
-        self.did_close = False
-
+        self.basic_auth_token = info.get_header('Authorization')
         try:
-            self.browser_session_id = info.get_cookie(settings.SESSION_COOKIE_NAME).value
-            self.csrf_token = info.get_cookie(settings.CSRF_COOKIE_NAME).value
+            if not self.basic_auth_token:
+                self.browser_session_id = info.get_cookie(settings.SESSION_COOKIE_NAME).value
+                self.csrf_token = info.get_cookie(settings.CSRF_COOKIE_NAME).value
         except AttributeError:
             # The request didn't contain the necessary cookie values.  We can't
             # close immediately because sockjs-tornado doesn't expect a close
@@ -127,12 +172,13 @@ class SocketConnection(sockjs.tornado.SockJSConnection):
                                        'response': {'result': 'error', 'msg': 'Already authenticated'}})
             return
 
-        user_profile = get_user_profile(self.browser_session_id)
+        user_profile = get_user_profile(self.browser_session_id) or api_key_authenticate(
+            self.basic_auth_token)
         if user_profile is None:
             raise SocketAuthError('Unknown or missing session')
         self.session.user_profile = user_profile
-
-        if not _compare_salted_tokens(msg['request']['csrf_token'], self.csrf_token):
+        if self.csrf_token and not _compare_salted_tokens(msg['request']['csrf_token'],
+                                                          self.csrf_token):
             raise SocketAuthError('CSRF token does not match that in cookie')
 
         if 'queue_id' not in msg['request']:

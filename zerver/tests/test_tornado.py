@@ -50,10 +50,22 @@ class WebSocketBaseTestCase(AsyncHTTPTestCase, ZulipTestCase):
         settings.RUNNING_INSIDE_TORNADO = False
 
     @gen.coroutine
-    def ws_connect(self, path, cookie_header, compression_options=None):
-        # type: (str, str, Optional[Any]) -> Generator[Any, Callable[[HTTPRequest, Optional[Any]], Any], None]
+    def ws_connect(self,
+                   path,  # type: str
+                   cookie_header=None,  # type: Optional[str]
+                   api_key=None,  # type: Optional[str]
+                   email=None,  # type: Optional[str]
+                   compression_options=None  # type: Optional[str]
+                   ):
+        # type: (...) -> Generator[Any, Callable[[HTTPRequest, Optional[Any]], Any], None]
         request = HTTPRequest(url='ws://127.0.0.1:%d%s' % (self.get_http_port(), path))
-        request.headers.add('Cookie', cookie_header)
+        if cookie_header:
+            request.headers.add('Cookie', cookie_header)
+        elif api_key and email:
+            request.auth_username = email
+            request.auth_password = api_key
+        else:
+            self.fail('No auth arguments')
         ws = yield websocket_connect(
             request,
             compression_options=compression_options)
@@ -79,8 +91,12 @@ class TornadoTestCase(WebSocketBaseTestCase):
         return create_tornado_application()
 
     @staticmethod
-    def tornado_call(view_func, user_profile, post_data):
-        # type: (Callable[[HttpRequest, UserProfile], HttpResponse], UserProfile, Dict[str, Any]) -> HttpResponse
+    def tornado_call(
+            view_func,  # type: Callable[[HttpRequest, UserProfile], HttpResponse]
+            user_profile,  # type: UserProfile
+            post_data  # type: Dict[str, Any]
+    ):
+        # type: (...) -> HttpResponse
         request = POSTRequestMock(post_data, user_profile)
         return view_func(request, user_profile)
 
@@ -96,14 +112,14 @@ class TornadoTestCase(WebSocketBaseTestCase):
         return resp.cookies
 
     @gen.coroutine
-    def _websocket_auth(self, ws, queue_events_data, cookies):
+    def _websocket_auth(self, ws, queue_events_data, cookies=None):
         # type: (Any, Dict[str, Dict[str, str]], SimpleCookie) -> Generator[str, str, None]
         auth_queue_id = ':'.join((queue_events_data['response']['queue_id'], '0'))
         message = {
             "req_id": auth_queue_id,
             "type": "auth",
             "request": {
-                "csrf_token": cookies.get('csrftoken').coded_value,
+                "csrf_token": cookies.get('csrftoken').coded_value if cookies else None,
                 "queue_id": queue_events_data['response']['queue_id'],
                 "status_inquiries": []
             }
@@ -181,27 +197,8 @@ class TornadoTestCase(WebSocketBaseTestCase):
                 }
             ])
 
-    @gen_test
-    def test_tornado_connect(self):
-        # type: () -> Generator[str, Any, None]
-        user_profile = UserProfile.objects.filter(email='hamlet@zulip.com').first()
-        cookies = self._get_cookies(user_profile)
-        cookie_header = self.get_cookie_header(cookies)
-        ws = yield self.ws_connect('/sockjs/366/v8nw22qe/websocket', cookie_header=cookie_header)
-        response = yield ws.read_message()
-        self.assertEqual(response, 'o')
-
-    @gen_test
-    def test_tornado_auth(self):
-        # type: () -> Generator[str, TornadoTestCase, None]
-        user_profile = UserProfile.objects.filter(email='hamlet@zulip.com').first()
-        cookies = self._get_cookies(user_profile)
-        cookie_header = self.get_cookie_header(cookies)
-        ws = yield self.ws_connect('/sockjs/366/v8nw22qe/websocket', cookie_header=cookie_header)
-        yield ws.read_message()
-        queue_events_data = self._get_queue_events_data(user_profile.email)
-        request_id = ':'.join((queue_events_data['response']['queue_id'], '0'))
-        response = yield self._websocket_auth(ws, queue_events_data, cookies)
+    def _check_auth_response(self, response, request_id):
+        # type: (str, str) -> None
         self.assertEqual(response[0][0], 'a')
         self.assertEqual(
             ujson.loads(response[0][1:]),
@@ -223,6 +220,29 @@ class TornadoTestCase(WebSocketBaseTestCase):
                  },
                  "type": "response"}
             ])
+
+    @gen_test
+    def test_tornado_connect(self):
+        # type: () -> Generator[str, Any, None]
+        user_profile = UserProfile.objects.filter(email='hamlet@zulip.com').first()
+        cookies = self._get_cookies(user_profile)
+        cookie_header = self.get_cookie_header(cookies)
+        ws = yield self.ws_connect('/sockjs/366/v8nw22qe/websocket', cookie_header=cookie_header)
+        response = yield ws.read_message()
+        self.assertEqual(response, 'o')
+
+    @gen_test
+    def test_tornado_auth(self):
+        # type: () -> Generator[str, TornadoTestCase, None]
+        user_profile = UserProfile.objects.filter(email='hamlet@zulip.com').first()
+        cookies = self._get_cookies(user_profile)
+        cookie_header = self.get_cookie_header(cookies)
+        ws = yield self.ws_connect('/sockjs/366/v8nw22qe/websocket', cookie_header=cookie_header)
+        yield ws.read_message()
+        queue_events_data = self._get_queue_events_data(user_profile.email)
+        request_id = ':'.join((queue_events_data['response']['queue_id'], '0'))
+        response = yield self._websocket_auth(ws, queue_events_data, cookies)
+        self._check_auth_response(response, request_id)
 
     @gen_test
     def test_sending_private_message(self):
@@ -291,3 +311,15 @@ class TornadoTestCase(WebSocketBaseTestCase):
         ack_resp = yield ws.read_message()
         msg_resp = yield ws.read_message()
         self._check_message_sending(request_id, ack_resp, msg_resp, user_profile, queue_events_data)
+
+    @gen_test
+    def test_websocket_api_auth(self):
+        # type: () -> Generator[str, TornadoTestCase, None]
+        user_profile = UserProfile.objects.filter(email='hamlet@zulip.com').first()
+        ws = yield self.ws_connect('/sockjs/366/v8nw22qe/websocket', api_key=user_profile.api_key,
+                                   email=user_profile.email)
+        yield ws.read_message()
+        queue_events_data = self._get_queue_events_data(user_profile.email)
+        request_id = ':'.join((queue_events_data['response']['queue_id'], '0'))
+        response = yield self._websocket_auth(ws, queue_events_data)
+        self._check_auth_response(response, request_id)
