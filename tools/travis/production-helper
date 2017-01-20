@@ -107,7 +107,8 @@ if ! /usr/lib/nagios/plugins/zulip_app_frontend/check_queue_worker_errors || \
     echo "FAILURE: Nagios checks don't pass:"
     echo
     echo "DEBUG: printing Zulip server's error log:"
-    cat /var/log/zulip/errors.log
+    echo "$(cat /var/log/zulip/errors.log)"
+    echo "$(cat /var/log/zulip/tornado.log)"
     exit 1
 fi
 echo "Production installation test successful!"

@@ -81,7 +81,6 @@ def req_redis_key(req_id):
 
 def api_key_authenticate(auth_header_value):
     # type: (str) -> UserProfile
-    from zilencer.models import Deployment
     auth_type, credentials = auth_header_value.split()
     # case insensitive per RFC 1945
     if auth_type.lower() != "basic":
@@ -91,7 +90,7 @@ def api_key_authenticate(auth_header_value):
         profile = get_deployment_or_userprofile(role)
     except UserProfile.DoesNotExist:
         raise SocketAuthError("Invalid user: {}".format(role))
-    except Deployment.DoesNotExist:
+    except Exception:
         raise SocketAuthError("Invalid deployment: {}".format(role))
     if api_key != profile.api_key:
         if len(api_key) != 32:
