@@ -105,6 +105,8 @@ def move_expired_attachments_message_rows_to_archive():
 
 def delete_expired_messages():
     # type: () -> None
+    # Delete messages after retention period
+    # if they already have been moved to archive.
     removing_messages = Message.objects.filter(
         usermessage__isnull=True, id__in=ArchivedMessage.objects.all())
     removing_messages.delete()
@@ -112,6 +114,8 @@ def delete_expired_messages():
 
 def delete_expired_user_messages():
     # type: () -> None
+    # Delete user_messages after retention period
+    # if they are already moved to archive.
     removing_user_messages = UserMessage.objects.filter(
         id__in=ArchivedUserMessage.objects.all()
     )
@@ -120,6 +124,8 @@ def delete_expired_user_messages():
 
 def delete_expired_attachments():
     # type: () -> None
+    # Delete attachments after retention period
+    # if they already have been moved to archive.
     attachments_to_remove = Attachment.objects.filter(
         messages__isnull=True, id__in=ArchivedAttachment.objects.all())
     attachments_to_remove.delete()
@@ -127,6 +133,7 @@ def delete_expired_attachments():
 
 def archive_messages():
     # type: () -> None
+    # The main function for archiving messages' data.
     move_expired_messages_to_archive()
     move_expired_user_messages_to_archive()
     move_expired_attachments_to_archive()
@@ -138,6 +145,8 @@ def archive_messages():
 
 def delete_expired_archived_attachments():
     # type: () -> None
+    # Delete old archived attachments from archive table
+    # after retention period for archived data.
     expired_date = timezone.now() - timedelta(days=settings.ARCHIVED_DATA_RETENTION_DAYS)
     arc_attachments = ArchivedAttachment.objects \
         .filter(archive_timestamp__lt=expired_date, messages__isnull=True) \
@@ -149,6 +158,8 @@ def delete_expired_archived_attachments():
 
 def delete_expired_archived_data():
     # type: () -> None
+    # Delete old archived messages and user_messages from archive tables
+    # after retention period for archived data.
     arc_expired_date = timezone.now() - timedelta(days=settings.ARCHIVED_DATA_RETENTION_DAYS)
     ArchivedUserMessage.objects.filter(archive_timestamp__lt=arc_expired_date).delete()
     ArchivedMessage.objects.filter(archive_timestamp__lt=arc_expired_date,
@@ -158,6 +169,7 @@ def delete_expired_archived_data():
 
 def restore_archived_messages_by_realm(realm_id):
     # type: (int) -> None
+    # Function for restoring archived messages by realm for emergency cases.
     query = """
         INSERT INTO zerver_message ({dst_fields})
         SELECT {src_fields}
@@ -174,6 +186,7 @@ def restore_archived_messages_by_realm(realm_id):
 
 def restore_archived_usermessages_by_realm(realm_id):
     # type: (int) -> None
+    # Function for restoring archived user_messages by realm for emergency cases.
     query = """
         INSERT INTO zerver_usermessage ({dst_fields})
         SELECT {src_fields}
@@ -189,6 +202,7 @@ def restore_archived_usermessages_by_realm(realm_id):
 
 def restore_archived_attachments_by_realm(realm_id):
     # type: (int) -> None
+    # Function for restoring archived attachments by realm for emergency cases.
     query = """
        INSERT INTO zerver_attachment ({dst_fields})
        SELECT {src_fields}
@@ -208,6 +222,8 @@ def restore_archived_attachments_by_realm(realm_id):
 
 def restore_archived_attachments_message_rows_by_realm(realm_id):
     # type: (int) -> None
+    # Function for restoring archived data in many-to-many attachment_messages
+    # table by realm for emergency cases.
     query = """
        INSERT INTO zerver_attachment_messages (id, attachment_id, message_id)
        SELECT zerver_archivedattachment_messages.id, zerver_archivedattachment_messages.archivedattachment_id,
@@ -228,6 +244,7 @@ def restore_archived_attachments_message_rows_by_realm(realm_id):
 
 def restore_realm_archived_data(realm_id):
     # type: (int) -> None
+    # The main function for restoring archived messages' data by realm.
     restore_archived_messages_by_realm(realm_id)
     restore_archived_usermessages_by_realm(realm_id)
     restore_archived_attachments_by_realm(realm_id)
